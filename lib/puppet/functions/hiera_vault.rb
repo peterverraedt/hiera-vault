@@ -65,6 +65,8 @@ Puppet::Functions.create_function(:hiera_vault) do
       raise ArgumentError, "[hiera-vault] invalid value for default_field_behavior: '#{options['default_field_behavior']}', should be one of 'ignore','only'"
     end
 
+    strict_mode = options.key?('strict_mode') and options['strict_mode']
+
     begin
       vault = Vault::Client.new
       return context.not_found if vault.token == 'IGNORE-VAULT'
@@ -107,10 +109,10 @@ Puppet::Functions.create_function(:hiera_vault) do
 
       begin
         secret = vault.logical.read(path)
-      rescue Vault::HTTPConnectionError
-        context.explain { "[hiera-vault] Could not connect to read secret: #{path}" }
+      rescue Vault::HTTPConnectionError => e
+        raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not connect to read secret #{path}: #{e.original_exception}"
       rescue Vault::HTTPError => e
-        context.explain { "[hiera-vault] Could not read secret #{path}: #{e.errors.join("\n").rstrip}" }
+        raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not read secret #{path}: #{e.errors.inspect}"
       end
 
       next if secret.nil?
@@ -119,7 +121,7 @@ Puppet::Functions.create_function(:hiera_vault) do
       if (options['default_field'] && ['ignore', nil].include?(options['default_field_behavior'])) ||
          (secret.data.has_key?(options['default_field'].to_sym) && secret.data.length == 1)
 
-        return nil if ! secret.data.has_key?(options['default_field'].to_sym)
+        break if ! secret.data.has_key?(options['default_field'].to_sym)
 
         new_answer = secret.data[options['default_field'].to_sym]
 
@@ -143,6 +145,9 @@ Puppet::Functions.create_function(:hiera_vault) do
         break
       end
     end
+
+    raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not find secret #{key}" if answer.nil? and strict_mode
+
     answer = context.not_found if answer.nil?
     return answer
   end
