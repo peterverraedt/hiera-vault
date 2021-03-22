@@ -112,7 +112,7 @@ Puppet::Functions.create_function(:hiera_vault) do
       rescue Vault::HTTPConnectionError => e
         raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not connect to read secret #{path}: #{e.original_exception}"
       rescue Vault::HTTPError => e
-        raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not read secret #{path}: #{e.errors.inspect}"
+        raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not read secret #{path}: #{e.errors.inspect}" unless e.code == 403 and !strict_mode
       end
 
       next if secret.nil?
