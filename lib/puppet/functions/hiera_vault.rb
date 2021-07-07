@@ -66,6 +66,7 @@ Puppet::Functions.create_function(:hiera_vault) do
     end
 
     strict_mode = options.key?('strict_mode') and options['strict_mode']
+    lookup_retries = options['lookup_retries'] || 0
 
     begin
       vault = Vault::Client.new
@@ -107,12 +108,20 @@ Puppet::Functions.create_function(:hiera_vault) do
       path = context.interpolate(File.join(mount, key))
       context.explain { "[hiera-vault] Looking in path #{path}" }
 
-      begin
-        secret = vault.logical.read(path)
-      rescue Vault::HTTPConnectionError => e
-        raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not connect to read secret #{path}: #{e.original_exception}"
-      rescue Vault::HTTPError => e
-        raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not read secret #{path}: #{e.errors.inspect}" unless e.code == 403 and !strict_mode
+      while true
+        begin
+          secret = vault.logical.read(path)
+          break
+        rescue Vault::HTTPConnectionError => e
+          raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not connect to read secret #{path}: #{e.original_exception}"
+        rescue Vault::HTTPError => e
+          raise Puppet::DataBinding::LookupError, "[hiera-vault] Could not read secret #{path}: #{e.errors.inspect}" unless e.code == 403 and (!strict_mode or lookup_retries > 0)
+        end
+
+        break unless lookup_retries > 0
+
+        sleep 1
+        lookup_retries -= 1
       end
 
       next if secret.nil?
